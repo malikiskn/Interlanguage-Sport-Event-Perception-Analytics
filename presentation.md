@@ -196,3 +196,14 @@ ProjetRecherche/
 ---
 
 *Ce projet s'inscrit dans le cadre d'un Master 2 Recherche en Sciences du Sport et vise à contribuer à la compréhension des biais cognitifs dans le sport professionnel.*
+
+
+X description:
+
+Sentiment Analysis of Football Match Reactions on Social Media
+
+This academic research project aims to analyze supporter sentiment and emotional responses during UEFA Champions League and Premier League football matches by collecting and analyzing tweets in real-time. The study focuses on understanding how fans express their emotions, opinions, and reactions during live sporting events across multiple languages (English, French, Spanish, and German).
+
+We will collect tweets during specific match time windows using relevant hashtags and team-related keywords. The data will be analyzed using natural language processing and sentiment analysis techniques to identify patterns in fan behavior, emotional intensity, and cross-cultural differences in how supporters engage with football content on social media.
+
+The research will contribute to understanding digital sports fandom, social media dynamics during live events, and multilingual sentiment expression. All data will be used exclusively for academic purposes at the University of Caen Normandy (Master's level research project) and will comply with data protection regulations. Results may be published in academic venues while respecting user privacy and X's terms of service.

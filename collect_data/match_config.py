@@ -46,7 +46,7 @@ DEFAULT_MATCHES: List[MatchConfig] = [
             language="en",
             query="(#ARSMAD OR #AFCATL OR #UCL OR #ChampionsLeague OR "
                   "Arsenal OR Gunners OR Atletico) lang:en",
-            max_tweets=42,
+            max_tweets=5,
         ),
         QueryConfig(
             language="es",

@@ -110,6 +110,19 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         help="Seconds to sleep between paginated requests to avoid rate limits.",
     )
     parser.add_argument(
+        "--since-id",
+        type=str,
+        help=(
+            "Fetch only tweets newer than this tweet ID. "
+            "Cannot be used with time filters (--no-time-filter will be auto-enabled)."
+        ),
+    )
+    parser.add_argument(
+        "--no-time-filter",
+        action="store_true",
+        help="Ignore start_time/end_time from match config. Useful with --since-id.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Load configuration and authenticate but do not call the API.",
@@ -221,6 +234,8 @@ def collect_query(
     sleep_seconds: float,
     append: bool,
     max_per_query: Optional[int] = None,
+    since_id: Optional[str] = None,
+    no_time_filter: bool = False,
 ) -> int:
     """Fetch tweets for a single query and persist them to disk."""
 
@@ -235,28 +250,36 @@ def collect_query(
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     existing_tweet_ids = set()
-    since_id: Optional[str] = None
     write_header = True
 
     if append and output_file.exists() and output_file.stat().st_size > 0:
         write_header = False
         mode = "a"
         # Read existing tweet IDs to perform client-side deduplication.
-        # This is a fallback in case the `since_id` parameter still returns
-        # tweets that were already collected.
         existing_tweet_ids = get_existing_tweet_ids(output_file)
-        # Get the most recent tweet ID to avoid re-fetching older tweets.
-        since_id = get_most_recent_tweet_id(output_file)
+        print(f"  - Found {len(existing_tweet_ids)} existing tweets, will skip duplicates")
+        
+        # Auto-detect since_id from file if not provided and we want to use it
+        if since_id is None and no_time_filter:
+            since_id = get_most_recent_tweet_id(output_file)
+            if since_id:
+                print(f"  - Auto-detected since_id: {since_id}")
     else:
         if output_file.exists():
             output_file.unlink()
         mode = "w"
 
+    # Auto-enable no_time_filter if since_id is provided (API restriction)
+    if since_id:
+        no_time_filter = True
+        print(f"  - Using since_id={since_id}, time filters disabled (API requirement)")
+
     total_written = 0
+    total_skipped = 0
     next_token: Optional[str] = None
     request_count = 0
 
-    # Prepare API parameters, including `since_id` if available.
+    # Prepare API parameters
     api_params = query_config.additional_params.copy() if query_config.additional_params else {}
     if since_id:
         api_params["since_id"] = since_id
@@ -268,10 +291,15 @@ def collect_query(
 
         while total_written < effective_limit:
             batch_size = min(100, effective_limit - total_written)
+            
+            # Use time filters only if not disabled
+            start_time = None if no_time_filter else match.start_time
+            end_time = None if no_time_filter else match.end_time
+            
             payload = client.search_recent(
                 query=query_config.query,
-                start_time=match.start_time,
-                end_time=match.end_time,
+                start_time=start_time,
+                end_time=end_time,
                 next_token=next_token,
                 max_results=batch_size,
                 additional_params=api_params,
@@ -287,7 +315,8 @@ def collect_query(
 
             for tweet in tweets:
                 tweet_id = tweet.get("id")
-                if tweet_id in existing_tweet_ids:
+                # Skip if we've already collected this tweet
+                if tweet_id and tweet_id in existing_tweet_ids:
                     continue
 
                 author = user_map.get(tweet.get("author_id"))
@@ -353,6 +382,8 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
                 sleep_seconds=args.sleep,
                 append=args.append,
                 max_per_query=args.max_per_query,
+                since_id=args.since_id,
+                no_time_filter=args.no_time_filter,
             )
             total += written
 

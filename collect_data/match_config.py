@@ -31,79 +31,37 @@ class MatchConfig:
 
 DEFAULT_MATCHES: List[MatchConfig] = [
     MatchConfig(
-        match_id="2024-10-01_psg_dortmund",
-        home_team="Paris Saint-Germain",
-        away_team="Borussia Dortmund",
-        competition="UEFA Champions League",
-        start_time="2024-10-01T19:00:00Z",
-        end_time="2024-10-02T19:00:00Z",
-        notes="Example configuration – update the time window around the actual fixture",
-        queries=[
-            QueryConfig(
-                language="fr",
-                query="(\"PSG\" OR \"Paris\") (\"Dortmund\" OR \"BVB\") lang:fr",
-                max_tweets=600,
-            ),
-            QueryConfig(
-                language="de",
-                query="(\"Dortmund\" OR \"BVB\") (\"PSG\" OR \"Paris\") lang:de",
-                max_tweets=600,
-            ),
-            QueryConfig(
-                language="en",
-                query="(#PSGBVB OR \"PSG\" OR \"Dortmund\") lang:en",
-                max_tweets=400,
-            ),
-        ],
+    match_id="2025-10-21_arsenal_atletico",
+    home_team="Arsenal FC",
+    away_team="Atlético Madrid",
+    competition="UEFA Champions League",  
+    start_time="2025-10-21T22:00:00Z",   # 21h00 heure de Paris
+    end_time="2025-10-21T23:00:00Z",     # ≈ 2 heures après la fin du match
+    notes=(
+        "Match joué à 21h00 heure de Paris (UTC+2). "
+        "Fenêtre de collecte couvrant la durée du match et les 2 heures post-match."
     ),
-    MatchConfig(
-        match_id="2024-10-02_real_barca",
-        home_team="Real Madrid",
-        away_team="FC Barcelona",
-        competition="UEFA Champions League",
-        start_time="2024-10-02T19:00:00Z",
-        end_time="2024-10-03T19:00:00Z",
-        notes="Second example – replace with the fixtures you plan to analyse",
-        queries=[
-            QueryConfig(
-                language="es",
-                query="(\"Real Madrid\" OR \"Hala Madrid\") (\"Barcelona\" OR \"Barça\") lang:es",
-            ),
-            QueryConfig(
-                language="en",
-                query="(\"Real Madrid\" OR \"Barcelona\") (#UCL OR \"Champions League\") lang:en",
-                max_tweets=300,
-            ),
-            QueryConfig(
-                language="ca",
-                query="(\"Barça\" OR \"Barcelona\") (\"Madrid\") lang:ca",
-                max_tweets=200,
-            ),
-        ],
-    ),
-    MatchConfig(
-        match_id="2025-09-28_newcastle_arsenal",
-        home_team="Newcastle United",
-        away_team="Arsenal FC",
-        competition="Premier League",
-        start_time="2025-09-28T15:30:00Z",
-        end_time="2025-09-28T20:45:00Z",
-        notes="Match joué à 17h30 heure de Paris (UTC+2). Ajustez la fenêtre selon le volume désiré.",
-        queries=[
-            QueryConfig(
-                language="en",
-                query="(#NEWARS OR #NUFC OR #AFC OR Newcastle OR Arsenal) lang:en",
-                max_tweets=10,
-            ),
-            QueryConfig(
-                language="fr",
-                query="(#NEWARS OR Newcastle OR Arsenal) lang:fr",
-                max_tweets=10,
-            ),
-        ],
-    ),
+    queries=[
+        QueryConfig(
+            language="en",
+            query="(#ARSMAD OR #AFCATL OR #UCL OR #ChampionsLeague OR "
+                  "Arsenal OR Gunners OR Atletico) lang:en",
+            max_tweets=42,
+        ),
+        QueryConfig(
+            language="es",
+            query="(#ARSMAD OR #AFCATL OR #UCL OR #LDC OR Arsenal OR Atletico) lang:fr",
+            max_tweets=10,
+        ),
+        QueryConfig(
+            language="fr",
+            query="(#ARSMAD OR #AFCATL OR #UCL OR #ChampionsLeague OR Arsenal OR Atletico) lang:es",
+            max_tweets=10,
+        ),
+    ],
+)
 ]
-
+  
 
 def get_match_by_id(match_id: str) -> Optional[MatchConfig]:
     """Retrieve a match configuration by its identifier."""

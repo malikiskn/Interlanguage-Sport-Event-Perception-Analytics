@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import csv
 import os
 import sys
 import time
@@ -12,6 +12,35 @@ from typing import Iterable, Optional
 
 from .match_config import DEFAULT_MATCHES, MatchConfig, QueryConfig, get_match_by_id
 from .twitter_client import TwitterAPIError, TwitterClient
+
+CSV_FIELDS = [
+    "collected_at",
+    "match_id",
+    "competition",
+    "home_team",
+    "away_team",
+    "query",
+    "query_language",
+    "tweet_id",
+    "tweet_created_at",
+    "tweet_lang",
+    "tweet_text",
+    "conversation_id",
+    "possibly_sensitive",
+    "source",
+    "retweet_count",
+    "reply_count",
+    "like_count",
+    "quote_count",
+    "author_id",
+    "author_username",
+    "author_name",
+    "author_verified",
+    "author_followers_count",
+    "author_following_count",
+    "author_tweet_count",
+    "author_listed_count",
+]
 
 
 def load_bearer_token(env_path: Optional[str] = None) -> str:
@@ -52,7 +81,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default="collect_data/data",
-        help="Directory where JSONL files will be stored.",
+        help="Directory where CSV files will be stored.",
     )
     parser.add_argument(
         "--env-file",
@@ -88,7 +117,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--append",
         action="store_true",
-        help="Append to existing JSONL files instead of overwriting them.",
+        help="Append to existing CSV files instead of overwriting them.",
     )
     return parser.parse_args(argv)
 
@@ -106,6 +135,83 @@ def select_matches(match_ids: Optional[Iterable[str]]) -> Iterable[MatchConfig]:
     return matches
 
 
+def build_row(
+    *,
+    timestamp: str,
+    match: MatchConfig,
+    query_config: QueryConfig,
+    tweet: dict,
+    author: Optional[dict],
+) -> dict:
+    """Convert the API payload to a flat CSV-friendly structure."""
+
+    metrics = tweet.get("public_metrics") or {}
+    author_metrics = (author or {}).get("public_metrics") or {}
+
+    return {
+        "collected_at": timestamp,
+        "match_id": match.match_id,
+        "competition": match.competition,
+        "home_team": match.home_team,
+        "away_team": match.away_team,
+        "query": query_config.query,
+        "query_language": query_config.language,
+        "tweet_id": tweet.get("id"),
+        "tweet_created_at": tweet.get("created_at"),
+        "tweet_lang": tweet.get("lang"),
+        "tweet_text": tweet.get("text"),
+        "conversation_id": tweet.get("conversation_id"),
+        "possibly_sensitive": tweet.get("possibly_sensitive"),
+        "source": tweet.get("source"),
+        "retweet_count": metrics.get("retweet_count"),
+        "reply_count": metrics.get("reply_count"),
+        "like_count": metrics.get("like_count"),
+        "quote_count": metrics.get("quote_count"),
+        "author_id": (author or {}).get("id"),
+        "author_username": (author or {}).get("username"),
+        "author_name": (author or {}).get("name"),
+        "author_verified": (author or {}).get("verified"),
+        "author_followers_count": author_metrics.get("followers_count"),
+        "author_following_count": author_metrics.get("following_count"),
+        "author_tweet_count": author_metrics.get("tweet_count"),
+        "author_listed_count": author_metrics.get("listed_count"),
+    }
+
+
+def get_existing_tweet_ids(output_file: Path) -> set[str]:
+    """Read existing tweet IDs from a CSV file."""
+    if not output_file.exists() or output_file.stat().st_size == 0:
+        return set()
+
+    with output_file.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return {row["tweet_id"] for row in reader if "tweet_id" in row}
+
+
+def get_most_recent_tweet_id(output_file: Path) -> Optional[str]:
+    """Read a CSV file and return the ID of the most recent tweet."""
+    if not output_file.exists() or output_file.stat().st_size == 0:
+        return None
+
+    most_recent_tweet = None
+    try:
+        with output_file.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            # Find the latest tweet in the file to avoid re-fetching old data.
+            # ISO 8601 timestamps can be compared lexicographically.
+            for row in reader:
+                if row.get("tweet_created_at"):
+                    if (
+                        most_recent_tweet is None
+                        or row["tweet_created_at"] > most_recent_tweet["tweet_created_at"]
+                    ):
+                        most_recent_tweet = row
+    except (FileNotFoundError, StopIteration):
+        return None
+
+    return most_recent_tweet.get("tweet_id") if most_recent_tweet else None
+
+
 def collect_query(
     client: TwitterClient,
     match: MatchConfig,
@@ -118,21 +224,48 @@ def collect_query(
 ) -> int:
     """Fetch tweets for a single query and persist them to disk."""
 
-    effective_limit = min(max_per_query, query_config.max_tweets) if max_per_query else query_config.max_tweets
+    effective_limit = (
+        min(max_per_query, query_config.max_tweets)
+        if max_per_query
+        else query_config.max_tweets
+    )
     if effective_limit <= 0:
         return 0
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    mode = "a" if append and output_file.exists() else "w"
-    if mode == "w" and output_file.exists():
-        output_file.unlink()
+    existing_tweet_ids = set()
+    since_id: Optional[str] = None
+    write_header = True
+
+    if append and output_file.exists() and output_file.stat().st_size > 0:
+        write_header = False
+        mode = "a"
+        # Read existing tweet IDs to perform client-side deduplication.
+        # This is a fallback in case the `since_id` parameter still returns
+        # tweets that were already collected.
+        existing_tweet_ids = get_existing_tweet_ids(output_file)
+        # Get the most recent tweet ID to avoid re-fetching older tweets.
+        since_id = get_most_recent_tweet_id(output_file)
+    else:
+        if output_file.exists():
+            output_file.unlink()
+        mode = "w"
 
     total_written = 0
     next_token: Optional[str] = None
     request_count = 0
 
-    with output_file.open(mode, encoding="utf-8") as handle:
+    # Prepare API parameters, including `since_id` if available.
+    api_params = query_config.additional_params.copy() if query_config.additional_params else {}
+    if since_id:
+        api_params["since_id"] = since_id
+
+    with output_file.open(mode, encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+        if write_header:
+            writer.writeheader()
+
         while total_written < effective_limit:
             batch_size = min(100, effective_limit - total_written)
             payload = client.search_recent(
@@ -141,7 +274,7 @@ def collect_query(
                 end_time=match.end_time,
                 next_token=next_token,
                 max_results=batch_size,
-                additional_params=query_config.additional_params,
+                additional_params=api_params,
             )
             request_count += 1
             tweets = payload.get("data", [])
@@ -153,20 +286,22 @@ def collect_query(
             timestamp = datetime.now(timezone.utc).isoformat()
 
             for tweet in tweets:
+                tweet_id = tweet.get("id")
+                if tweet_id in existing_tweet_ids:
+                    continue
+
                 author = user_map.get(tweet.get("author_id"))
-                record = {
-                    "collected_at": timestamp,
-                    "match_id": match.match_id,
-                    "competition": match.competition,
-                    "home_team": match.home_team,
-                    "away_team": match.away_team,
-                    "query": query_config.query,
-                    "query_language": query_config.language,
-                    "tweet": tweet,
-                    "author": author,
-                }
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                row = build_row(
+                    timestamp=timestamp,
+                    match=match,
+                    query_config=query_config,
+                    tweet=tweet,
+                    author=author,
+                )
+                writer.writerow(row)
                 total_written += 1
+                if tweet_id:
+                    existing_tweet_ids.add(tweet_id)
 
             next_token = payload.get("meta", {}).get("next_token")
             if not next_token:
@@ -208,7 +343,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
             continue
 
         for query_config in filtered_queries:
-            output_filename = f"{match.match_id}_{query_config.language}.jsonl"
+            output_filename = f"{match.match_id}_{query_config.language}.csv"
             output_path = Path(args.output_dir) / output_filename
             written = collect_query(
                 client,

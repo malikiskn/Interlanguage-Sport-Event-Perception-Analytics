@@ -289,12 +289,16 @@ def collect_query(
         if write_header:
             writer.writeheader()
 
+        print(f"  - Starting collection for {query_config.language} (max: {effective_limit} tweets)...")
+        
         while total_written < effective_limit:
             batch_size = min(100, effective_limit - total_written)
             
             # Use time filters only if not disabled
             start_time = None if no_time_filter else match.start_time
             end_time = None if no_time_filter else match.end_time
+            
+            print(f"    📡 Request #{request_count + 1}: Fetching up to {batch_size} tweets...", end="", flush=True)
             
             payload = client.search_recent(
                 query=query_config.query,
@@ -307,16 +311,23 @@ def collect_query(
             request_count += 1
             tweets = payload.get("data", [])
             includes = payload.get("includes", {})
+            
             if not tweets:
+                print(f" No more tweets available.")
                 break
 
             user_map = {u["id"]: u for u in includes.get("users", [])}
             timestamp = datetime.now(timezone.utc).isoformat()
+            
+            batch_written = 0
+            batch_skipped = 0
 
             for tweet in tweets:
                 tweet_id = tweet.get("id")
                 # Skip if we've already collected this tweet
                 if tweet_id and tweet_id in existing_tweet_ids:
+                    total_skipped += 1
+                    batch_skipped += 1
                     continue
 
                 author = user_map.get(tweet.get("author_id"))
@@ -329,17 +340,25 @@ def collect_query(
                 )
                 writer.writerow(row)
                 total_written += 1
+                batch_written += 1
                 if tweet_id:
                     existing_tweet_ids.add(tweet_id)
 
+            print(f" ✓ Got {len(tweets)} tweets, wrote {batch_written} new, skipped {batch_skipped} duplicates (total: {total_written}/{effective_limit})")
+            
             next_token = payload.get("meta", {}).get("next_token")
             if not next_token:
+                print(f"    ℹ️  No more pages available.")
                 break
+            
+            if sleep_seconds > 0:
+                print(f"    ⏳ Sleeping {sleep_seconds}s before next request...")
             time.sleep(max(0.0, sleep_seconds))
 
+    skip_msg = f", skipped {total_skipped} duplicates" if total_skipped > 0 else ""
     print(
-        f"  - {query_config.language}: stored {total_written} tweets "
-        f"in {output_file.name} (requests: {request_count})"
+        f"  ✅ {query_config.language}: Stored {total_written} new tweets "
+        f"in {output_file.name} (requests: {request_count}{skip_msg})"
     )
     return total_written
 
@@ -351,16 +370,27 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     languages = set(args.languages) if args.languages else None
 
     if args.dry_run:
-        print(f"Dry run successful. Loaded {len(matches)} match configuration(s).")
+        print(f"✓ Dry run successful. Loaded {len(matches)} match configuration(s).")
         if languages:
-            print(f"Language filter: {sorted(languages)}")
+            print(f"  Language filter: {sorted(languages)}")
         return
+
+    print(f"🚀 Starting tweet collection...")
+    print(f"   Matches: {len(matches)}")
+    if languages:
+        print(f"   Languages: {sorted(languages)}")
+    if args.since_id:
+        print(f"   Since ID: {args.since_id}")
+    if args.no_time_filter:
+        print(f"   Time filters: Disabled")
+    print()
 
     client = TwitterClient(bearer_token=bearer_token)
     total = 0
 
-    for match in matches:
-        print(f"Collecting match {match.match_id} ({match.home_team} vs {match.away_team})")
+    for idx, match in enumerate(matches, 1):
+        print(f"📊 [{idx}/{len(matches)}] Collecting match: {match.match_id}")
+        print(f"   {match.home_team} vs {match.away_team}")
         filtered_queries = [
             query_config for query_config in match.queries
             if not languages or query_config.language in languages
@@ -386,8 +416,10 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
                 no_time_filter=args.no_time_filter,
             )
             total += written
+        
+        print()  # Empty line between matches
 
-    print(f"Done. Stored {total} tweets across {len(matches)} match(es).")
+    print(f"🎉 Done! Stored {total} tweets across {len(matches)} match(es).")
 
 
 if __name__ == "__main__":

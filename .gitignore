@@ -1,0 +1,17 @@
+# Fichiers Système Mac
+.DS_Store
+
+# Python (Cache)
+__pycache__/
+*.pyc
+
+# Environnement Virtuel (si tu en as un)
+venv/
+env/
+.env
+
+# Résultats générés (on ne versionne pas les résultats, on versionne le code qui les produit)
+results/
+
+# Si tu ne veux pas envoyer le gros fichier source (optionnel, mais conseillé pour >50Mo)
+# Ici ton fichier fait 4Mo donc tu peux le laisser, pas besoin de l'ignorer.

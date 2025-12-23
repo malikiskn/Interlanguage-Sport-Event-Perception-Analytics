@@ -1,21 +1,26 @@
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from scipy.special import softmax
-import torch
-import pandas as pd
 import os
+
+# --- 🛑 ZONE DE SÉCURITÉ OBLIGATOIRE (M4) ---
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+# --------------------------------------------
+
+import pandas as pd
 import glob
+import torch
 import numpy as np
+# 👇 CHANGEMENT ICI : On importe directement la classe RoBERTa
+from transformers import AutoTokenizer, RobertaForSequenceClassification
+from scipy.special import softmax
 
 # --- CONFIGURATION ---
 DATA_DIR = "collect_data/data"
 RESULTS_DIR = "results"
-# Modèle célèbre entraîné sur ~124 millions de tweets (le standard académique)
 MODEL_NAME = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
 def preprocess_tweet(text):
-    """Nettoie le tweet pour que l'IA le comprenne mieux."""
-    if not isinstance(text, str):
-        return ""
+    if not isinstance(text, str): return ""
     new_text = []
     for t in text.split(" "):
         t = '@user' if t.startswith('@') and len(t) > 1 else t
@@ -24,83 +29,64 @@ def preprocess_tweet(text):
     return " ".join(new_text)
 
 def run_analysis():
-    print(f"🧠 Chargement du modèle IA '{MODEL_NAME}' sur le Mac M4...")
+    print(f"🧠 Chargement du modèle sur Mac M4 (Mode Force)...")
     
-    # 1. Chargement du Tokenizer (le traducteur Texte -> Chiffres) et du Modèle
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-    
-    # Création du dossier de résultats
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    
-    # Récupération des fichiers
-    files = glob.glob(os.path.join(DATA_DIR, "*.csv"))
-    print(f"📂 {len(files)} fichiers trouvés à analyser.")
+    # 1. Chargement Tokenizer & Modèle (Avec classe explicite)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        # 👇 CHANGEMENT ICI : On force l'utilisation de RoBERTa
+        model = RobertaForSequenceClassification.from_pretrained(MODEL_NAME)
+    except Exception as e:
+        print(f"❌ Erreur critique : {e}")
+        return
 
-    # Labels du modèle
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    files = glob.glob(os.path.join(DATA_DIR, "*.csv"))
     labels = ['Negative', 'Neutral', 'Positive']
+
+    print(f"📂 {len(files)} fichiers trouvés.")
 
     for i, file_path in enumerate(files):
         filename = os.path.basename(file_path)
-        print(f"\n[{i+1}/{len(files)}] Analyse de : {filename} ...")
+        print(f"[{i+1}/{len(files)}] Traitement : {filename}")
         
         try:
             df = pd.read_csv(file_path)
-            
-            # On vérifie que le fichier n'est pas vide
-            if len(df) == 0:
-                print("   ⚠️ Fichier vide, on passe.")
-                continue
+            if len(df) == 0: continue
 
-            # Création des listes pour stocker les résultats
-            sentiment_results = []
-            confidence_scores = []
-
-            # BOUCLE SUR CHAQUE TWEET (C'est là que l'IA travaille)
-            # On prend un échantillon si c'est trop gros pour aller vite ce soir
-            tweets_to_process = df['tweet_text'].tolist()
+            texts = df['tweet_text'].tolist()
+            # On ne traite que les 50 premiers pour tester si ça passe (optionnel)
+            # texts = texts[:50] 
             
-            for tweet in tweets_to_process:
-                # A. Nettoyage
-                clean_text = preprocess_tweet(tweet)
-                
-                # B. Transformation en chiffres (Tensors)
-                encoded_input = tokenizer(clean_text, return_tensors='pt')
-                
-                # C. Prédiction (Le cerveau réfléchit)
-                with torch.no_grad(): # On désactive l'apprentissage pour aller plus vite
-                    output = model(**encoded_input)
-                
-                # D. Calcul des scores (Probabilités)
+            processed_texts = [preprocess_tweet(t) for t in texts]
+            
+            sentiments = []
+            scores_list = []
+
+            # Analyse ligne par ligne
+            for text in processed_texts:
+                encoded = tokenizer(text, return_tensors='pt')
+                output = model(**encoded)
                 scores = output[0][0].detach().numpy()
-                scores = softmax(scores) # Transforme en % (ex: 0.9, 0.05, 0.05)
+                scores = softmax(scores)
                 
-                # E. Décision
                 ranking = np.argsort(scores)
-                top_ranking = ranking[-1] # Le score le plus élevé
+                top_rank = ranking[-1]
                 
-                sentiment = labels[top_ranking]
-                confidence = scores[top_ranking]
-                
-                sentiment_results.append(sentiment)
-                confidence_scores.append(confidence)
+                sentiments.append(labels[top_rank])
+                scores_list.append(scores[top_rank])
 
-            # Ajout des colonnes au fichier Excel/CSV
-            df['ai_sentiment'] = sentiment_results
-            df['ai_score'] = confidence_scores
+            df['ai_sentiment'] = sentiments
+            df['ai_score'] = scores_list
             
-            # Sauvegarde dans le nouveau dossier
             output_path = os.path.join(RESULTS_DIR, f"analyzed_{filename}")
             df.to_csv(output_path, index=False)
-            print(f"   ✅ Sauvegardé dans : {output_path}")
+            print(f"   ✅ OK ({len(df)} tweets)")
 
         except Exception as e:
-            print(f"   ❌ Erreur sur ce fichier : {e}")
+            print(f"   ⚠️ Erreur fichier : {e}")
 
-    print("\n" + "="*50)
-    print("🚀 TERMINÉ ! Tous les tweets ont été analysés par l'IA.")
-    print(f"👉 Va voir dans le dossier '{RESULTS_DIR}' pour les résultats.")
-    print("="*50)
+    print("\n🚀 TERMINÉ ! Tout s'est bien passé.")
 
 if __name__ == "__main__":
     run_analysis()

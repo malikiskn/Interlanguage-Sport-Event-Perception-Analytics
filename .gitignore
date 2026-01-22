@@ -16,3 +16,4 @@ results/
 # Si tu ne veux pas envoyer le gros fichier source (optionnel, mais conseillé pour >50Mo)
 # Ici ton fichier fait 4Mo donc tu peux le laisser, pas besoin de l'ignorer
 venv_nlp/
+charts/
